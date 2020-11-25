@@ -34,12 +34,8 @@
     <RawAccessRead onmatch="exclude" />      
     <!--Event ID 10: ProcessAccess-->
 	<RuleGroup name="" groupRelation="or">
-	<ProcessAccess onmatch="exclude"> 
-		<GrantedAccess condition="is">0x1000</GrantedAccess>
-		<GrantedAccess condition="is">0x1010</GrantedAccess>
-		<GrantedAccess condition="is">0x1400</GrantedAccess>
-		<SourceImage condition="is">C:\WINDOWS\system32\svchost.exe</SourceImage>
-		<SourceImage condition="is">C:\WINDOWS\Explorer.exe</SourceImage>
+	<ProcessAccess onmatch="include"> 
+		<GrantedAccess condition="more than">0x1437</GrantedAccess>
 	</ProcessAccess>
 	</RuleGroup>
     <!--Event ID 11: FileCreate-->

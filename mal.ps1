@@ -1,9 +1,9 @@
 ﻿$SysmonPath = "C:\ProgramData\chocolatey\lib\sysinternals\tools\Sysmon64.exe"
-$SysmonConfig =  "C:\Users\luke\desktop\FullLogging.xml"
+$SysmonConfig =  "C:\Users\luke\desktop\triage\FullLogging.xml"
 $OutDirRoot = "C:\Users\luke\desktop\triage\"
-$Execute = "C:\WINDOWS\System32\cmd.exe"
-#$Execute = "C:\Program Files\Process Hacker 2\ProcessHacker.exe"
-$executetime = 120
+#$Execute = "C:\WINDOWS\System32\cmd.exe"
+$Execute = "C:\Users\luke\desktop\rev.exe"
+$executetime = 30
 
 Function PrintMessage($Msg){
     $default = "$($Msg.UtcTime) - $($Msg.Type):"
@@ -12,9 +12,10 @@ Function PrintMessage($Msg){
         "File created"="`t$($Msg.Image):$($Msg.ProcessId)`n`tCreated File:$($Msg.TargetFilename)`n"
         "Network connection detected"="`t$($Msg.Image):$($Msg.ProcessId)`n`t$($Msg.Protocol) $($Msg.SourceIp):$($Msg.SourcePort) => $($Msg.DestinationIp):$($Msg.DestinationPort) $($Msg.DestinationHostName)`n"
         "Dns query"="`t$($Msg.Image):$($Msg.ProcessId)`n`tQuery:$($Msg.QueryName) => Answer:$($Msg.QueryResults)`n"
-        "Registry value set"="`t$($Msg.Image):$($Msg.ProcessId)`n`tKey:$($Msg.TargetObject) => $($Msg.Details)`n"
-        "Pipe Created"="`t$($Msg.Image):$($Msg.ProcessId)`n`tPipeName:$($Msg.PipeName)`n"
-
+        "Registry value set"="`t$($Msg.Image):$($Msg.ProcessId)`n`tKey => $($Msg.TargetObject) => $($Msg.Details)`n"
+        "Pipe Created"="`t$($Msg.Image):$($Msg.ProcessId)`n`tPipeName => $($Msg.PipeName)`n"
+        "Process accessed"="`t$($Msg.SourceImage):$($Msg.SourceProcessId)`n`tAccessed ($($Msg.GrantedAccess)) => $($Msg.TargetImage):$($Msg.TargetProcessId)`n"
+        "CreateRemoteThread detected"="`t$($Msg.SourceImage):$($Msg.SourceProcessId)`n`tCreated Thread => $($Msg.TargetImage):$($Msg.TargetProcessId) ThreadId => $($Msg.NewThreadId)`n"
     }
     if($PrintStrings.ContainsKey($Msg.Type)){
         Write-Host $default -ForegroundColor Green
@@ -39,7 +40,8 @@ Function get_evts_by_keyword($term){
 }
 
 Function get_evts_by_proc_id($id){
-    $events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational -FilterXPath ("*/*/Data[@Name='ProcessId']=$($id)") -ErrorAction SilentlyContinue
+    #$events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational -FilterXPath ("*/*/Data[@Name='ProcessId']=$($id)") -ErrorAction SilentlyContinue
+    $events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational |  Where-Object { $_.Message -match "`nProcessId:\s$($id)" -or $_.Message -match "SourceProcessId:\s$($id)" }
     return $events
 }
 
@@ -92,7 +94,7 @@ Function collect_files($events,$id){
     $hashes | Out-File "$($OutDir)hashes.txt"
 }
 
-$OutDir = "$($OutDirRoot)$($name)$($id)-$($date)/"
+$OutDir = "$($OutDirRoot)$($name)_$($id)-$($date)/"
 md -Force "$($OutDir)/files" > $null
 Start-Transcript -OutputDirectory $OutDir
 
@@ -101,18 +103,16 @@ start-process -FilePath $SysmonPath -ArgumentList "-i $($SysmonConfig) -accepteu
 
 $date = $(get-date -f HH_mm_ss)
 Write-Host "Executing: $Execute" -ForegroundColor Cyan
-$proc = (Start-Process -FilePath $Execute -PassThru -Wait)
+$proc = (Start-Process -FilePath $Execute -PassThru)
 $id = $proc.Id
 $name = $proc.Name
 Write-host "$($name) with ProcessId: $($id)" -ForegroundColor Cyan
 
-#Start-Sleep $executetime
+Start-Sleep $executetime
 
 $events = get_events($id)
 pprint_events($events)
 collect_files($events)
-
-#Start-Process "C:\ProgramData\chocolatey\lib\sysinternals\tools\PsExec.exe"
 
 while(1){
     $term = Read-Host -Prompt "Search logs for keyword, get process tree events with events(processid), or exit()"
@@ -126,7 +126,7 @@ while(1){
     $events = get_evts_by_keyword($term)
     $events | format-list | write-output
 }
-#Stop-Process $proc.Id
+Stop-Process $id
 
 start-process -FilePath $SysmonPath -ArgumentList "-u"
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
