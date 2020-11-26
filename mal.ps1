@@ -26,7 +26,7 @@ Function PrintMessage($Msg){
         }
         elseif($Msg.Type -eq "Process accessed"){
             $access = [int]($Msg.GrantedAccess)
-            if($access -ge 0x1438){
+            if($access -ge 0x1438 -and $access -lt 0x1fff){
                 Write-Host $default -ForegroundColor Green
                 Write-Host "Process injection likely." -ForegroundColor Red
                 Write-Output $PrintStrings[$Msg.Type]
@@ -73,7 +73,7 @@ Function get_child_evt_ids($id){
     $memids = @()
     foreach($event in $memwritepriv){
         $access = $event.Message | Select-String -Pattern "GrantedAccess: (.*)" | % {($_.matches.groups[1]).value}
-        if([int]$access -ge 0x1438){
+        if([int]$access -ge 0x1438 -and [int]$access -lt 0x1fff){
             $memids += $event.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value}
         }
     }
@@ -91,7 +91,7 @@ Function get_event_tree($id){
     $child_ids = get_child_evt_ids($id)
     if($child_ids.Count -gt 0){
         foreach($c_id in $child_ids){
-           $events += get_events($c_id)
+           $events += get_event_tree($c_id)
         }
     }
     return $events
@@ -121,11 +121,11 @@ Function collect_files($events,$id){
                 $hashes += $hash
                 Copy-Item $event.TargetFilename -Destination "$($OutDir)files/$([System.IO.Path]::GetFilenameWithoutExtension($event.TargetFilename))_$($hash)"
             }else{
-                Write-Host "File: $($event.TargetFIlename) missing, recover deleted file" -ForegroundColor
+                Write-Host "File: $($event.TargetFIlename) missing, recover deleted file" -ForegroundColor Yellow
             }
         }
     }
-    $hashes | Out-File "$($OutDir)hashes.txt"
+    $hashes | Out-File -Encoding ascii -Append "$($OutDir)hashes.txt"
 }
 
 $OutDir = "$($OutDirRoot)$($name)_$($id)-$($date)/"
