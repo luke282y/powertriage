@@ -3,7 +3,7 @@ $SysmonConfig =  "C:\Users\luke\desktop\triage\FullLogging.xml"
 $OutDirRoot = "C:\Users\luke\desktop\triage\"
 #$Execute = "C:\WINDOWS\System32\cmd.exe"
 $Execute = "C:\Users\luke\desktop\rev.exe"
-$executetime = 30
+$executetime = 20
 
 Function PrintMessage($Msg){
     $default = "$($Msg.UtcTime) - $($Msg.Type):"
@@ -14,17 +14,32 @@ Function PrintMessage($Msg){
         "Dns query"="`t$($Msg.Image):$($Msg.ProcessId)`n`tQuery:$($Msg.QueryName) => Answer:$($Msg.QueryResults)`n"
         "Registry value set"="`t$($Msg.Image):$($Msg.ProcessId)`n`tKey => $($Msg.TargetObject) => $($Msg.Details)`n"
         "Pipe Created"="`t$($Msg.Image):$($Msg.ProcessId)`n`tPipeName => $($Msg.PipeName)`n"
+        "Pipe Connected"="`t$($Msg.Image):$($Msg.ProcessId)`n`tPipeName => $($Msg.PipeName)`n"
         "Process accessed"="`t$($Msg.SourceImage):$($Msg.SourceProcessId)`n`tAccessed ($($Msg.GrantedAccess)) => $($Msg.TargetImage):$($Msg.TargetProcessId)`n"
         "CreateRemoteThread detected"="`t$($Msg.SourceImage):$($Msg.SourceProcessId)`n`tCreated Thread => $($Msg.TargetImage):$($Msg.TargetProcessId) ThreadId => $($Msg.NewThreadId)`n"
     }
     if($PrintStrings.ContainsKey($Msg.Type)){
-        Write-Host $default -ForegroundColor Green
-        Write-Output $PrintStrings[$Msg.Type]
+        if($Msg.Type -eq "CreateRemoteThread detected"){
+            Write-Host $default -ForegroundColor Green
+            Write-Host "Process injection likely." -ForegroundColor Red
+            Write-Output $PrintStrings[$Msg.Type]
+        }
+        elseif($Msg.Type -eq "Process accessed"){
+            $access = [int]($Msg.GrantedAccess)
+            if($access -ge 0x1438){
+                Write-Host $default -ForegroundColor Green
+                Write-Host "Process injection likely." -ForegroundColor Red
+                Write-Output $PrintStrings[$Msg.Type]
+            }
+        }
+        else {
+            Write-Host $default -ForegroundColor Green
+            Write-Output $PrintStrings[$Msg.Type]
+        }
     }
     else{
-        
         Write-Host $default -ForegroundColor Green
-        Write-Output ($Msg | Out-String)
+        Write-Output ($Msg | Format-Table)
     }
 }
 
@@ -35,23 +50,42 @@ Function pprint_events($events){
 }
 
 Function get_evts_by_keyword($term){
-     $events = get-winevent -LogName "Microsoft-Windows-Sysmon/Operational" | Where-Object { $_.Message -match $term }
+     $events = $all_events | Where-Object { $_.Message -match $term }
      return $events
 }
 
 Function get_evts_by_proc_id($id){
-    #$events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational -FilterXPath ("*/*/Data[@Name='ProcessId']=$($id)") -ErrorAction SilentlyContinue
-    $events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational |  Where-Object { $_.Message -match "`nProcessId:\s$($id)" -or $_.Message -match "SourceProcessId:\s$($id)" }
+    $events = $all_events | Where-Object { $_.Message -match "`nProcessId:\s$($id)" -or $_.Message -match "SourceProcessId:\s$($id)" }
     return $events
 }
 
 Function get_child_evt_ids($id){
-    $events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational -FilterXPath ("*/*/Data[@Name='ParentProcessId']=$($id)") -ErrorAction SilentlyContinue
+    #normal child events from process create
+    $events = $all_events |  Where-Object { $_.Message -match "ParentProcessId:\s$($id)" }
     $ids = $events | % { $_.Message | Select-String -Pattern "ProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Get-Unique
-    return $ids
+    
+    #CreateRemoteThread child events
+    $threads = $all_events |  Where-Object { $_.Message -match "CreateRemoteThread" -and $_.Message -match "SourceProcessId:\s$($id)" }
+    $ids += $threads | % { $_.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Get-Unique
+    
+    #child process for likely injected processes based on mem access priviledges
+	$memwritepriv = $all_events |  Where-Object { $_.Message -match "Process access" -and $_.Message -match "SourceProcessId:\s$($id)" }
+    $memids = @()
+    foreach($event in $memwritepriv){
+        $access = $event.Message | Select-String -Pattern "GrantedAccess: (.*)" | % {($_.matches.groups[1]).value}
+        if([int]$access -ge 0x1438){
+            $memids += $event.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value}
+        }
+    }
+    #$ids += $memids | Get-Unique
+    
+    #TODO: process ids based on created services
+    #TODO: process ids based on WMI events
+
+    return $ids|Get-Unique
 }
 
-Function get_events($id){
+Function get_event_tree($id){
     $events = @(get_evts_by_proc_id($id))
 
     $child_ids = get_child_evt_ids($id)
@@ -110,21 +144,26 @@ Write-host "$($name) with ProcessId: $($id)" -ForegroundColor Cyan
 
 Start-Sleep $executetime
 
-$events = get_events($id)
+$global:all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
+
+$events = get_event_tree($id)
 pprint_events($events)
 collect_files($events)
 
 while(1){
     $term = Read-Host -Prompt "Search logs for keyword, get process tree events with events(processid), or exit()"
+    $all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
     if($term -eq "exit()"){
         break
-    }
-    if($term -match "^events\(\d*\)"){
+    }elseif($term -match "^events\(\d*\)"){
         $id = $term | Select-String -Pattern "^events\((\d+)\)" | % {($_.matches.groups[1]).value}
-        get_events($id)
+        $events = get_event_tree($id)
+        pprint_events($events)
+        collect_files($events)
+    }else{
+        $events = get_evts_by_keyword($term)
+        $events | format-list | write-output
     }
-    $events = get_evts_by_keyword($term)
-    $events | format-list | write-output
 }
 Stop-Process $id
 

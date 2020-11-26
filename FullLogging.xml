@@ -34,8 +34,14 @@
     <RawAccessRead onmatch="exclude" />      
     <!--Event ID 10: ProcessAccess-->
 	<RuleGroup name="" groupRelation="or">
-	<ProcessAccess onmatch="include"> 
-		<GrantedAccess condition="more than">0x1437</GrantedAccess>
+	<ProcessAccess onmatch="exclude">
+		<SourceImage condition="is">C:\WINDOWS\system32\svchost.exe</SourceImage>
+		<SourceImage condition="is">C:\WINDOWS\Explorer.exe</SourceImage>
+		<SourceImage condition="is">C:\WINDOWS\system32\cmd.exe</SourceImage>
+		<TargetImage condition="is">C:\WINDOWS\system32\cmd.exe</TargetImage>
+		<GrantedAccess condition="is">0x1000</GrantedAccess>
+		<GrantedAccess condition="is">0x1010</GrantedAccess>
+		<GrantedAccess condition="is">0x1400</GrantedAccess>
 	</ProcessAccess>
 	</RuleGroup>
     <!--Event ID 11: FileCreate-->
@@ -47,7 +53,7 @@
     <FileCreateStreamHash onmatch="exclude" />     
     <!--Event ID 17: PipeEvent (Pipe Created)-->
     <!--Event ID 18: PipeEvent (Pipe Connected)-->
-    <PipeEvent onmatch="exclude" />
+    <PipeEvent onmatch="include" />
 	<!--Event ID 19: WmiEvent (WmiEventFilter activity detected)-->
     <!--Event ID 20: WmiEvent (WmiEventConsumer activity detected)-->
     <!--Event ID 21: WmiEvent (WmiEventConsumerToFilter activity detected)-->
