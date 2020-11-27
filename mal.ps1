@@ -1,8 +1,8 @@
 ﻿$SysmonPath = "C:\ProgramData\chocolatey\lib\sysinternals\tools\Sysmon64.exe"
 $SysmonConfig =  "C:\Users\luke\desktop\triage\FullLogging.xml"
 $OutDirRoot = "C:\Users\luke\desktop\triage\"
-$Execute = "C:\WINDOWS\System32\cmd.exe"
-#$Execute = "C:\Users\luke\desktop\rev.exe"
+#$Execute = "C:\WINDOWS\System32\cmd.exe"
+$Execute = "C:\Users\luke\desktop\rev.exe"
 $executetime = 30
 
 Function PrintMessage($Msg){
@@ -61,13 +61,14 @@ Function get_evts_by_proc_id($id){
 }
 
 Function get_child_evt_ids($id){
+    $ids = @()
     #normal child events from process create
     $events = $all_events |  Where-Object { $_.Message -match "ParentProcessId:\s$($id)" }
-    $ids = $events | % { $_.Message | Select-String -Pattern "ProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object | Get-Unique
+    $ids += $events | % { $_.Message | Select-String -Pattern "ProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object | Get-Unique
     
     #CreateRemoteThread child events
     $threads = $all_events |  Where-Object { $_.Message -match "CreateRemoteThread" -and $_.Message -match "SourceProcessId:\s$($id)" }
-    $ids += $threads | % { $_.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object Get-Unique
+    $ids += $threads | % { $_.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object | Get-Unique
     
     #child process for likely injected processes based on mem access priviledges
 	$memwritepriv = $all_events |  Where-Object { $_.Message -match "Process access" -and $_.Message -match "SourceProcessId:\s$($id)" }
@@ -76,14 +77,17 @@ Function get_child_evt_ids($id){
         $access = $event.Message | Select-String -Pattern "GrantedAccess: (.*)" | % {($_.matches.groups[1]).value}
         if([int]$access -ge 0x1438 -and [int]$access -lt 0x1fff){
             $memids += $event.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value}
+            Write-Host -ForegroundColor Yellow "memids: "
+            Write-Host -ForegroundColor Yellow $memids
         }
     }
-    #$ids += $memids | Get-Unique
-    
+
+    $ids = (($ids + $memids) | Sort-Object | Get-Unique)
+
     #TODO: process ids based on created services
     #TODO: process ids based on WMI events
 
-    return $ids| Sort-Object | Get-Unique
+    return $ids 
 }
 
 Function get_event_tree($id){
@@ -114,8 +118,6 @@ Function get_obj_from_evt($evt){
 Function collect_files($events,$id){
     if(Test-Path -Path "$($OutDir)hashes.txt"){
         $hashes = (Get-Content "$($OutDir)hashes.txt").split('`n')
-        Write-Host -ForegroundColor Yellow "hashes from file"
-        Write-Host -ForegroundColor Yellow $hashes
     }else{
         $hashes = @()
     }
@@ -142,12 +144,11 @@ Function collect_files($events,$id){
             Copy-Item $path -Destination "$($OutDir)files/deleted_$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
         }
     }
-    Write-Host -ForegroundColor Yellow "before unique"
-    Write-Host -ForegroundColor Yellow $hashes
+
     $hashes = $hashes | Sort-Object | Get-Unique
-    Write-Host -ForegroundColor Yellow "after unique"
-    Write-Host -ForegroundColor Yellow $hashes
-    $hashes | Out-File -Encoding ascii "$($OutDir)hashes.txt"
+    if($hashes.Count -ge 1){
+        $hashes | Out-File -Encoding ascii "$($OutDir)hashes.txt"
+    }
 }
 
 start-process -FilePath $SysmonPath -ArgumentList "-i $($SysmonConfig) -accepteula" -wait
