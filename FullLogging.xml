@@ -11,7 +11,8 @@
 <Sysmon schemaversion="4.21">
   <HashAlgorithms>sha1</HashAlgorithms>
   <!-- Disguising driver name -->
-  <DriverName>FSInfo</DriverName>
+  <DriverName>MALFIND</DriverName>
+  <ArchiveDirectory>DeletedFiles</ArchiveDirectory>
   <EventFiltering>
     <!--Event ID 1: Process creation-->
     <ProcessCreate onmatch="exclude">

@@ -1,15 +1,16 @@
 ﻿$SysmonPath = "C:\ProgramData\chocolatey\lib\sysinternals\tools\Sysmon64.exe"
 $SysmonConfig =  "C:\Users\luke\desktop\triage\FullLogging.xml"
 $OutDirRoot = "C:\Users\luke\desktop\triage\"
-#$Execute = "C:\WINDOWS\System32\cmd.exe"
-$Execute = "C:\Users\luke\desktop\rev.exe"
-$executetime = 20
+$Execute = "C:\WINDOWS\System32\cmd.exe"
+#$Execute = "C:\Users\luke\desktop\rev.exe"
+$executetime = 30
 
 Function PrintMessage($Msg){
     $default = "$($Msg.UtcTime) - $($Msg.Type):"
     $PrintStrings = @{
         "Process Create"="`t$($Msg.ParentImage):$($Msg.ParentProcessId)  => $($Msg.Commandline)`n`tNew Process => $($Msg.Image):$($Msg.ProcessId)`n`tHash:$($Msg.Hashes)`n"
         "File created"="`t$($Msg.Image):$($Msg.ProcessId)`n`tCreated File:$($Msg.TargetFilename)`n"
+        "File Delete"="`t$($Msg.Image):$($Msg.ProcessId)`n`tDeleted File:$($Msg.TargetFilename)`n`tHash:$($msg.Hashes)`n"
         "Network connection detected"="`t$($Msg.Image):$($Msg.ProcessId)`n`t$($Msg.Protocol) $($Msg.SourceIp):$($Msg.SourcePort) => $($Msg.DestinationIp):$($Msg.DestinationPort) $($Msg.DestinationHostName)`n"
         "Dns query"="`t$($Msg.Image):$($Msg.ProcessId)`n`tQuery:$($Msg.QueryName) => Answer:$($Msg.QueryResults)`n"
         "Registry value set"="`t$($Msg.Image):$($Msg.ProcessId)`n`tKey => $($Msg.TargetObject) => $($Msg.Details)`n"
@@ -62,11 +63,11 @@ Function get_evts_by_proc_id($id){
 Function get_child_evt_ids($id){
     #normal child events from process create
     $events = $all_events |  Where-Object { $_.Message -match "ParentProcessId:\s$($id)" }
-    $ids = $events | % { $_.Message | Select-String -Pattern "ProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Get-Unique
+    $ids = $events | % { $_.Message | Select-String -Pattern "ProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object | Get-Unique
     
     #CreateRemoteThread child events
     $threads = $all_events |  Where-Object { $_.Message -match "CreateRemoteThread" -and $_.Message -match "SourceProcessId:\s$($id)" }
-    $ids += $threads | % { $_.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Get-Unique
+    $ids += $threads | % { $_.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object Get-Unique
     
     #child process for likely injected processes based on mem access priviledges
 	$memwritepriv = $all_events |  Where-Object { $_.Message -match "Process access" -and $_.Message -match "SourceProcessId:\s$($id)" }
@@ -82,7 +83,7 @@ Function get_child_evt_ids($id){
     #TODO: process ids based on created services
     #TODO: process ids based on WMI events
 
-    return $ids|Get-Unique
+    return $ids| Sort-Object | Get-Unique
 }
 
 Function get_event_tree($id){
@@ -111,35 +112,58 @@ Function get_obj_from_evt($evt){
 }
 
 Function collect_files($events,$id){
+    if(Test-Path -Path "$($OutDir)hashes.txt"){
+        $hashes = (Get-Content "$($OutDir)hashes.txt").split('`n')
+        Write-Host -ForegroundColor Yellow "hashes from file"
+        Write-Host -ForegroundColor Yellow $hashes
+    }else{
+        $hashes = @()
+    }
     $fevents = $events | Where-Object { $_.Id -eq 11 }
-    $hashes = @()
+
     foreach($event in $fevents){
         $event = get_obj_from_evt($event)
         if($event.UtcTime -eq $event.CreationUtcTime){
             if(Test-Path -Path $event.TargetFilename){
-                $hash = (Get-FileHash -Algorithm MD5 $event.TargetFilename).Hash
+                $hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename).Hash
                 $hashes += $hash
-                Copy-Item $event.TargetFilename -Destination "$($OutDir)files/$([System.IO.Path]::GetFilenameWithoutExtension($event.TargetFilename))_$($hash)"
-            }else{
-                Write-Host "File: $($event.TargetFIlename) missing, recover deleted file" -ForegroundColor Yellow
+                Copy-Item $event.TargetFilename -Destination "$($OutDir)files/$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
             }
         }
     }
-    $hashes | Out-File -Encoding ascii -Append "$($OutDir)hashes.txt"
+    $fevents = $events | Where-Object { $_.Id -eq 23 }
+    foreach($event in $fevents){
+        $event = get_obj_from_evt($event)
+        $hash = (($event.hashes).split("="))[1]
+        $ext = [System.IO.Path]::GetExtension($event.TargetFilename)
+        $path = "C:\DeletedFiles\$($hash)$($ext)"
+        if(Test-Path -Path $path){
+            $hashes += $hash
+            Copy-Item $path -Destination "$($OutDir)files/deleted_$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
+        }
+    }
+    Write-Host -ForegroundColor Yellow "before unique"
+    Write-Host -ForegroundColor Yellow $hashes
+    $hashes = $hashes | Sort-Object | Get-Unique
+    Write-Host -ForegroundColor Yellow "after unique"
+    Write-Host -ForegroundColor Yellow $hashes
+    $hashes | Out-File -Encoding ascii "$($OutDir)hashes.txt"
 }
-
-$OutDir = "$($OutDirRoot)$($name)_$($id)-$($date)/"
-md -Force "$($OutDir)/files" > $null
-Start-Transcript -OutputDirectory $OutDir
 
 start-process -FilePath $SysmonPath -ArgumentList "-i $($SysmonConfig) -accepteula" -wait
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
 
-$date = $(get-date -f HH_mm_ss)
 Write-Host "Executing: $Execute" -ForegroundColor Cyan
+
 $proc = (Start-Process -FilePath $Execute -PassThru)
 $id = $proc.Id
 $name = $proc.Name
+
+$date = $(get-date -f HH_mm_ss)
+
+$OutDir = "$($OutDirRoot)$($name)_$($id)-$($date)/"
+md -Force "$($OutDir)/files" > $null
+Start-Transcript -OutputDirectory $OutDir
 Write-host "$($name) with ProcessId: $($id)" -ForegroundColor Cyan
 
 Start-Sleep $executetime
