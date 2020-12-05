@@ -1,6 +1,7 @@
 ﻿$SysmonPath = "C:\ProgramData\chocolatey\lib\sysinternals\tools\Sysmon64.exe"
 $SysmonConfig =  "C:\Users\luke\desktop\triage\FullLogging.xml"
 $OutDirRoot = "C:\Users\luke\desktop\triage\"
+$DeletedPath = "C:\DeletedFiles\"
 #$Execute = "C:\WINDOWS\System32\cmd.exe"
 $Execute = "C:\Users\luke\desktop\rev.exe"
 $executetime = 30
@@ -138,7 +139,7 @@ Function collect_files($events,$id){
         $event = get_obj_from_evt($event)
         $hash = (($event.hashes).split("="))[1]
         $ext = [System.IO.Path]::GetExtension($event.TargetFilename)
-        $path = "C:\DeletedFiles\$($hash)$($ext)"
+        $path = "$($DeletedPath)$($hash)$($ext)"
         if(Test-Path -Path $path){
             $hashes += $hash
             Copy-Item $path -Destination "$($OutDir)files/deleted_$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
@@ -151,6 +152,7 @@ Function collect_files($events,$id){
     }
 }
 
+md -Force "$($DeletedPath)" > $null
 start-process -FilePath $SysmonPath -ArgumentList "-i $($SysmonConfig) -accepteula" -wait
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
 
