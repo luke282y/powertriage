@@ -1,10 +1,11 @@
-﻿$SysmonPath = "C:\ProgramData\chocolatey\lib\sysinternals\tools\Sysmon64.exe"
-$SysmonConfig =  "C:\Users\luke\desktop\triage\FullLogging.xml"
-$OutDirRoot = "C:\Users\luke\desktop\triage\"
+﻿#CONFIGURATION: Change these variables to meet your environment
+$SysmonPath = "C:\triage\Sysmon64.exe"
+$SysmonConfig =  "C:\triage\FullLogging.xml"
+$OutDirRoot = "C:\triage\"
 $DeletedPath = "C:\DeletedFiles\"
-#$Execute = "C:\WINDOWS\System32\cmd.exe"
-$Execute = "C:\Users\luke\desktop\rev.exe"
+$Execute = "C:\WINDOWS\System32\cmd.exe"
 $executetime = 30
+$etl2pcapng = "C:\triage\etl2pcapng.exe"
 
 Function PrintMessage($Msg){
     $default = "$($Msg.UtcTime) - $($Msg.Type):"
@@ -123,26 +124,29 @@ Function collect_files($events,$id){
         $hashes = @()
     }
     $fevents = $events | Where-Object { $_.Id -eq 11 }
-
+    #process created files
     foreach($event in $fevents){
         $event = get_obj_from_evt($event)
-        if($event.UtcTime -eq $event.CreationUtcTime){
+        $timediff = New-TimeSpan -Start $event.UtcTime -End $event.CreationUtcTime
+        if($timediff -le $executetime){
             if(Test-Path -Path $event.TargetFilename){
                 $hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename).Hash
                 $hashes += $hash
-                Copy-Item $event.TargetFilename -Destination "$($OutDir)files/$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
+                Copy-Item $event.TargetFilename -Destination "$($OutDir)files\$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
             }
         }
     }
+    #process deleted files
     $fevents = $events | Where-Object { $_.Id -eq 23 }
     foreach($event in $fevents){
         $event = get_obj_from_evt($event)
+        $event | write-output
         $hash = (($event.hashes).split("="))[1]
         $ext = [System.IO.Path]::GetExtension($event.TargetFilename)
         $path = "$($DeletedPath)$($hash)$($ext)"
         if(Test-Path -Path $path){
             $hashes += $hash
-            Copy-Item $path -Destination "$($OutDir)files/deleted_$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
+            Copy-Item $path -Destination "$($OutDir)files\deleted_$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
         }
     }
 
@@ -152,9 +156,38 @@ Function collect_files($events,$id){
     }
 }
 
+Function network_capture_start(){
+    $tracefile = "$($OutDir)trace.etl"
+    New-NetEventSession -Name "maltrace" -LocalFilePath $tracefile > $null
+    Add-NetEventProvider -Name "Microsoft-Windows-TCPIP" -SessionName "maltrace" > $null
+    Add-NetEventPacketCaptureProvider -SessionName "maltrace" -TruncationLength 1500 > $null
+    Start-NetEventSession -Name "maltrace" > $null
+}
+
+Function network_capture_stop($events){
+    $tracefile = "$($OutDir)trace.etl"
+    Stop-NetEventSession -Name "maltrace"
+    Remove-NetEventSession
+    start-process -FilePath "$($etl2pcapng)" -ArgumentList "$($tracefile) $($OutDir)trace.pcapng"
+    #TODO: filter pcap by detected nework events
+}
+
+#Setup directories
 md -Force "$($DeletedPath)" > $null
+$date = $(get-date -f HH_mm_ss)
+$name = [System.IO.Path]::GetFilename($Execute)
+$OutDir = "$($OutDirRoot)$($name)-$($date)\"
+md -Force "$($OutDir)\files" > $null
+Write-Host "Ouput Directory: $($OutDir)`n" -ForegroundColor Cyan
+
+Start-Transcript -OutputDirectory $OutDir
+
+Write-Host "Starting Sysmon..." -ForegroundColor Cyan
 start-process -FilePath $SysmonPath -ArgumentList "-i $($SysmonConfig) -accepteula" -wait
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
+
+Write-Host "Starting network capture...`n" -ForegroundColor Cyan
+network_capture_start
 
 Write-Host "Executing: $Execute" -ForegroundColor Cyan
 
@@ -162,20 +195,19 @@ $proc = (Start-Process -FilePath $Execute -PassThru)
 $id = $proc.Id
 $name = $proc.Name
 
-$date = $(get-date -f HH_mm_ss)
+Write-host "ProcessId: $($id)" -ForegroundColor Cyan
 
-$OutDir = "$($OutDirRoot)$($name)_$($id)-$($date)/"
-md -Force "$($OutDir)/files" > $null
-Start-Transcript -OutputDirectory $OutDir
-Write-host "$($name) with ProcessId: $($id)" -ForegroundColor Cyan
-
+Write-Host "Monitoring system for: $($executetime) seconds`n" -ForegroundColor Cyan
 Start-Sleep $executetime
 
 $global:all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
 
+Write-Host "Parsing events for process tree: $($id)...`n" -ForegroundColor Cyan
 $events = get_event_tree($id)
+
 pprint_events($events)
 collect_files($events)
+network_capture_stop($events)
 
 while(1){
     $term = Read-Host -Prompt "Search logs for keyword, get process tree events with events(processid), or exit()"
@@ -192,6 +224,7 @@ while(1){
         $events | format-list | write-output
     }
 }
+
 Stop-Process $id
 
 start-process -FilePath $SysmonPath -ArgumentList "-u"
