@@ -147,9 +147,20 @@ Function collect_files($events,$id){
         $timediff = New-TimeSpan -Start $event.UtcTime -End $event.CreationUtcTime
         if($timediff -le $executetime){
             if(Test-Path -Path $event.TargetFilename){
-                $hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename).Hash
-                $hashes += $hash
-                Copy-Item $event.TargetFilename -Destination "$($OutDir)files\$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
+	    	try{
+                	$hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename).Hash
+               		$hashes += $hash
+                	Copy-Item $event.TargetFilename -Destination "$($OutDir)files\$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
+		}catch{
+			 $term = Read-Host -Prompt "Can't Copy $($event.TargetFilename). File is open in another process.`nKill processes and try again? [Y] or [N]"
+			 if($term -match "^y"){
+			 	kill_processes($events)
+				Start-Sleep 2
+				$hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename).Hash
+               			$hashes += $hash
+                		Copy-Item $event.TargetFilename -Destination "$($OutDir)files\$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
+			 }
+		}
             }
         }
     }
@@ -214,6 +225,14 @@ Function cleanup(){
     Remove-NetEventSession -ErrorAction SilentlyContinue
 }
 
+function kill_processes($events) {
+    $ids = $events | % { $_.Message | Select-String -Pattern "ProcessId: (\d+)" | % {($_.matches.groups[1]).value} } | Sort-Object | Get-Unique
+    foreach($id in $ids){
+    	Stop-Process -Id $id -ErrorAction SilentlyContinue
+	Wait-Process -Id $id -ErrorAction SilentlyContinue
+    }
+}
+
 #Setup directories
 md -Force "$($DeletedPath)" > $null
 $date = $(get-date -f HH_mm_ss)
@@ -242,11 +261,10 @@ Write-host "ProcessId: $($id)" -ForegroundColor Cyan
 Write-Host "Monitoring system for: $($executetime) seconds`n" -ForegroundColor Cyan
 Start-Sleep $executetime
 
-Write-Host "Processing events...`n" -ForegroundColor Cyan
+Write-Host "Parsing events for process tree: $($id)...`n" -ForegroundColor Cyan
 
 $global:all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
 
-Write-Host "Parsing events for process tree: $($id)...`n" -ForegroundColor Cyan
 $events = get_event_tree($id)
 
 pprint_events($events)
@@ -272,7 +290,7 @@ while(1){
     }
 }
 
-Stop-Process $id -ErrorAction SilentlyContinue
+kill_processes($all_events)
 
 start-process -FilePath $SysmonPath -ArgumentList "-u"
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
