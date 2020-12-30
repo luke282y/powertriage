@@ -65,6 +65,8 @@
 		<EventType condition="is">CreateKey</EventType>
 		<TargetObject condition="begin with">HKU\S-1</TargetObject>
 		<TargetObject condition="begin with">HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\</TargetObject>
+		<TargetObject condition="begin with">HKLM\SOFTWARE\Microsoft\Tracing\</TargetObject>
+		<TargetObject condition="begin with">HKCR\WOW6432Node\Interface</TargetObject>
 		<TargetObject condition="contains">DeliveryOptimization\Swarms</TargetObject>
 	</RegistryEvent>
 	</RuleGroup>
