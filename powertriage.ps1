@@ -290,7 +290,7 @@ while(1){
     }
 }
 
-kill_processes($all_events)
+kill_processes($events)
 
 start-process -FilePath $SysmonPath -ArgumentList "-u"
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
