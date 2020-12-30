@@ -1,11 +1,25 @@
-﻿#CONFIGURATION: Change these variables to meet your environment
-$SysmonPath = "C:\triage\Sysmon64.exe"
-$SysmonConfig =  "C:\triage\FullLogging.xml"
-$OutDirRoot = "C:\triage\"
+﻿param(
+    [string]$cmd
+)
+
+#CONFIGURATION: Change these variables to meet your environment
+$SysmonPath = "C:\powertriage\Sysmon64.exe"
+$SysmonConfig =  "C:\powertriage\FullLogging.xml"
+$OutDirRoot = "C:\powertriage\"
 $DeletedPath = "C:\DeletedFiles\"
-$Execute = "C:\WINDOWS\System32\cmd.exe"
+$etl2pcapng = "C:\powertriage\etl2pcapng.exe"
+$capture_ip = "10.1.2.105"
+
+$powershell = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+$exel = ''
+$word = ''
+
 $executetime = 30
-$etl2pcapng = "C:\triage\etl2pcapng.exe"
+$Execute = "C:\WINDOWS\System32\cmd.exe"
+
+if($cmd){
+    $Execute = $cmd
+}
 
 Function PrintMessage($Msg){
     $default = "$($Msg.UtcTime) - $($Msg.Type):"
@@ -140,7 +154,6 @@ Function collect_files($events,$id){
     $fevents = $events | Where-Object { $_.Id -eq 23 }
     foreach($event in $fevents){
         $event = get_obj_from_evt($event)
-        $event | write-output
         $hash = (($event.hashes).split("="))[1]
         $ext = [System.IO.Path]::GetExtension($event.TargetFilename)
         $path = "$($DeletedPath)$($hash)$($ext)"
@@ -160,7 +173,8 @@ Function network_capture_start(){
     $tracefile = "$($OutDir)trace.etl"
     New-NetEventSession -Name "maltrace" -LocalFilePath $tracefile > $null
     Add-NetEventProvider -Name "Microsoft-Windows-TCPIP" -SessionName "maltrace" > $null
-    Add-NetEventPacketCaptureProvider -SessionName "maltrace" -TruncationLength 1500 > $null
+    $proto = @(6,17)
+    Add-NetEventPacketCaptureProvider -SessionName "maltrace" -IpAddresses $capture_ip -IpProtocols $proto -TruncationLength 1500 > $null
     Start-NetEventSession -Name "maltrace" > $null
 }
 
@@ -170,6 +184,26 @@ Function network_capture_stop($events){
     Remove-NetEventSession
     start-process -FilePath "$($etl2pcapng)" -ArgumentList "$($tracefile) $($OutDir)trace.pcapng"
     #TODO: filter pcap by detected nework events
+}
+
+Function start_execution($Execute){
+    $extension = [System.IO.Path]::GetExtension($Execute)
+    switch($extension){
+        ".exe" {$proc = (Start-Process -FilePath $Execute -PassThru)}
+        ".ps1" {$proc = (Start-Process -FilePath $powershell -ArgumentList $Execute -PassThru)}
+        default {
+            Write-Host "Unknown Extension: $($extension)" -ForegroundColor Yellow
+            exit
+        }
+    }
+    return $proc
+}
+
+Function cleanup(){
+    #Clean up possible previous runs
+    (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
+    Stop-NetEventSession -Name "maltrace" -ErrorAction SilentlyContinue
+    Remove-NetEventSession -ErrorAction SilentlyContinue
 }
 
 #Setup directories
@@ -184,14 +218,14 @@ Start-Transcript -OutputDirectory $OutDir
 
 Write-Host "Starting Sysmon..." -ForegroundColor Cyan
 start-process -FilePath $SysmonPath -ArgumentList "-i $($SysmonConfig) -accepteula" -wait
-(New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
+
+cleanup
 
 Write-Host "Starting network capture...`n" -ForegroundColor Cyan
 network_capture_start
 
 Write-Host "Executing: $Execute" -ForegroundColor Cyan
-
-$proc = (Start-Process -FilePath $Execute -PassThru)
+$proc = start_execution($Execute)
 $id = $proc.Id
 $name = $proc.Name
 
@@ -225,7 +259,7 @@ while(1){
     }
 }
 
-Stop-Process $id
+Stop-Process $id -ErrorAction SilentlyContinue
 
 start-process -FilePath $SysmonPath -ArgumentList "-u"
 (New-Object System.Diagnostics.Eventing.Reader.EventLogSession).ClearLog("Microsoft-Windows-Sysmon/Operational")
