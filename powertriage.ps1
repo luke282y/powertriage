@@ -13,7 +13,7 @@ $etl2pcapng = "C:\powertriage\etl2pcapng.exe"
 $capture_ip = "10.1.2.105"
 
 $powershell = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-$exel = "C:\Program Files\Microsoft Office\Office16\EXCEL.EXE"
+$excel = "C:\Program Files\Microsoft Office\Office16\EXCEL.EXE"
 $word = "C:\Program Files\Microsoft Office\Office16\WINWORD.EXE"
 
 $executetime = 30
