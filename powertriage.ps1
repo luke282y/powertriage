@@ -242,6 +242,8 @@ Write-host "ProcessId: $($id)" -ForegroundColor Cyan
 Write-Host "Monitoring system for: $($executetime) seconds`n" -ForegroundColor Cyan
 Start-Sleep $executetime
 
+Write-Host "Processing events...`n" -ForegroundColor Cyan
+
 $global:all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
 
 Write-Host "Parsing events for process tree: $($id)...`n" -ForegroundColor Cyan
