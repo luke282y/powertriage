@@ -184,11 +184,12 @@ Function collect_files($events,$id){
 }
 
 Function network_capture_start(){
+    Add-DnsClientNrptRule -Namespace ".arpa" -NameServers "127.0.0.1"
     $tracefile = "$($OutDir)trace.etl"
     New-NetEventSession -Name "maltrace" -LocalFilePath $tracefile > $null
     Add-NetEventProvider -Name "Microsoft-Windows-TCPIP" -SessionName "maltrace" > $null
     $proto = @(6,17)
-    Add-NetEventPacketCaptureProvider -SessionName "maltrace" -IpAddresses $capture_ip -IpProtocols $proto -TruncationLength 1500 > $null
+    Add-NetEventPacketCaptureProvider -SessionName "maltrace" -EtherType 2048 -IpAddresses $capture_ip -IpProtocols $proto -TruncationLength 1500 > $null
     Start-NetEventSession -Name "maltrace" > $null
 }
 
