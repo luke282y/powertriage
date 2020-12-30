@@ -257,7 +257,9 @@ ii -path $OutDir
 while(1){
     $term = Read-Host -Prompt "Search logs for keyword, get process tree events with events(processid), or exit()"
     $all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
-    if($term -eq "exit()"){
+    if(!$term){
+    	continue
+    }elseif($term -eq "exit()"){
         break
     }elseif($term -match "^events\(\d*\)"){
         $id = $term | Select-String -Pattern "^events\((\d+)\)" | % {($_.matches.groups[1]).value}
