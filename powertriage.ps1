@@ -1,4 +1,5 @@
-﻿param(
+#Optional Parameters to execute file passed into the script
+param(
     [string]$cmd
 )
 
@@ -7,15 +8,17 @@ $SysmonPath = "C:\powertriage\Sysmon64.exe"
 $SysmonConfig =  "C:\powertriage\FullLogging.xml"
 $OutDirRoot = "C:\powertriage\"
 $DeletedPath = "C:\DeletedFiles\"
+
 $etl2pcapng = "C:\powertriage\etl2pcapng.exe"
 $capture_ip = "10.1.2.105"
 
 $powershell = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
-$exel = ''
-$word = ''
+$exel = "C:\Program Files\Microsoft Office\Office16\EXCEL.EXE"
+$word = "C:\Program Files\Microsoft Office\Office16\WINWORD.EXE"
 
 $executetime = 30
 $Execute = "C:\WINDOWS\System32\cmd.exe"
+#END CONFIGURATION
 
 if($cmd){
     $Execute = $cmd
@@ -190,7 +193,12 @@ Function start_execution($Execute){
     $extension = [System.IO.Path]::GetExtension($Execute)
     switch($extension){
         ".exe" {$proc = (Start-Process -FilePath $Execute -PassThru)}
+	".xls" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	".xlsx" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	".doc" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
+	".docx" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
         ".ps1" {$proc = (Start-Process -FilePath $powershell -ArgumentList $Execute -PassThru)}
+	
         default {
             Write-Host "Unknown Extension: $($extension)" -ForegroundColor Yellow
             exit
