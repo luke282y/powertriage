@@ -8,7 +8,7 @@
 		LIMITED TO THE IMPLIED WARRANTIES OF MERCHANTABILITY 
 		AND/OR FITNESS FOR A PARTICULAR PURPOSE
 		Use is subject to the terms specified at http://www.microsoft.com/info/cpyright.htm. -->
-<Sysmon schemaversion="4.21">
+<Sysmon schemaversion="4.5">
   <HashAlgorithms>sha1</HashAlgorithms>
   <!-- Disguising driver name -->
   <DriverName>MALFIND</DriverName>
@@ -80,5 +80,6 @@
 	</DnsQuery>
 	</RuleGroup>
 	<FileDelete onmatch="exclude" />
+	<ProcessTampering onmatch="exclude" />
   </EventFiltering>
 </Sysmon>

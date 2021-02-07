@@ -10,7 +10,7 @@ $OutDirRoot = "C:\powertriage\"
 $DeletedPath = "C:\DeletedFiles\"
 
 $etl2pcapng = "C:\powertriage\etl2pcapng.exe"
-$capture_ip = "10.1.2.105"
+$capture_ip = "192.168.1.10"
 
 $powershell = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 $excel = "C:\Program Files\Microsoft Office\Office16\EXCEL.EXE"
@@ -197,7 +197,7 @@ Function network_capture_stop($events){
     $tracefile = "$($OutDir)trace.etl"
     Stop-NetEventSession -Name "maltrace"
     Remove-NetEventSession
-    start-process -FilePath "$($etl2pcapng)" -ArgumentList "$($tracefile) $($OutDir)trace.pcapng"
+    start-process -FilePath "$($etl2pcapng)" -ArgumentList "`"$($tracefile)`" `"$($OutDir)trace.pcapng`""
     #TODO: filter pcap by detected nework events
 }
 
@@ -205,10 +205,11 @@ Function start_execution($Execute){
     $extension = [System.IO.Path]::GetExtension($Execute)
     switch($extension){
         ".exe" {$proc = (Start-Process -FilePath $Execute -PassThru)}
-	".xls" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
-	".xlsx" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
-	".doc" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
-	".docx" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
+        ".bat" {$proc = (Start-Process -FilePath $Execute -PassThru)}
+	    ".xls" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	    ".xlsx" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	    ".doc" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
+	    ".docx" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
         ".ps1" {$proc = (Start-Process -FilePath $powershell -ArgumentList $Execute -PassThru)}
 	
         default {
