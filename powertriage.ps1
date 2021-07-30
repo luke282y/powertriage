@@ -15,6 +15,7 @@ $capture_ip = "192.168.1.10"
 $powershell = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
 $excel = "C:\Program Files\Microsoft Office\Office16\EXCEL.EXE"
 $word = "C:\Program Files\Microsoft Office\Office16\WINWORD.EXE"
+$cscript = "C:\Windows\System32\cscript.exe"
 
 $executetime = 30
 $Execute = "C:\WINDOWS\System32\cmd.exe"
@@ -37,6 +38,7 @@ Function PrintMessage($Msg){
         "Pipe Connected"="`t$($Msg.Image):$($Msg.ProcessId)`n`tPipeName => $($Msg.PipeName)`n"
         "Process accessed"="`t$($Msg.SourceImage):$($Msg.SourceProcessId)`n`tAccessed ($($Msg.GrantedAccess)) => $($Msg.TargetImage):$($Msg.TargetProcessId)`n"
         "CreateRemoteThread detected"="`t$($Msg.SourceImage):$($Msg.SourceProcessId)`n`tCreated Thread => $($Msg.TargetImage):$($Msg.TargetProcessId) ThreadId => $($Msg.NewThreadId)`n"
+	"File Delete archived"="`t$($Msg.Image):$($Msg.ProcessId)`n`tDeleted File:$($Msg.TargetFilename)`n`tHash:$($msg.Hashes)`n"
     }
     if($PrintStrings.ContainsKey($Msg.Type)){
         if($Msg.Type -eq "CreateRemoteThread detected"){
@@ -96,8 +98,6 @@ Function get_child_evt_ids($id){
         $access = $event.Message | Select-String -Pattern "GrantedAccess: (.*)" | % {($_.matches.groups[1]).value}
         if([int]$access -ge 0x1438 -and [int]$access -lt 0x1fff){
             $memids += $event.Message | Select-String -Pattern "TargetProcessId: (\d+)" | % {($_.matches.groups[1]).value}
-            Write-Host -ForegroundColor Yellow "memids: "
-            Write-Host -ForegroundColor Yellow $memids
         }
     }
 
@@ -148,11 +148,12 @@ Function collect_files($events,$id){
         if($timediff -le $executetime){
             if(Test-Path -Path $event.TargetFilename){
 	    	try{
-                	$hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename).Hash
+                	$hash = (Get-FileHash -Algorithm SHA1 $event.TargetFilename -ErrorAction SilentlyContinue).Hash
                		$hashes += $hash
                 	Copy-Item $event.TargetFilename -Destination "$($OutDir)files\$([System.IO.Path]::GetFilename($event.TargetFilename))_$($hash)"
 		}catch{
-			 $term = Read-Host -Prompt "Can't Copy $($event.TargetFilename). File is open in another process.`nKill processes and try again? [Y] or [N]"
+			 Write-Host -ForegroundColor Yellow "Can't Copy $($event.TargetFilename). File is open in another process.`nKill processes and try again? [Y] or [N]"
+			 $term = Read-Host
 			 if($term -match "^y"){
 			 	kill_processes($events)
 				Start-Sleep 2
@@ -206,12 +207,23 @@ Function start_execution($Execute){
     switch($extension){
         ".exe" {$proc = (Start-Process -FilePath $Execute -PassThru)}
         ".bat" {$proc = (Start-Process -FilePath $Execute -PassThru)}
-	    ".xls" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
-	    ".xlsx" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
-	    ".doc" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
-	    ".docx" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
+	".xls" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	".xlsx" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	".xlsm" {$proc = (Start-Process -FilePath $excel -ArgumentList $Execute -PassThru)}
+	".doc" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
+	".docx" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
+	".docm" {$proc = (Start-Process -FilePath $word -ArgumentList $Execute -PassThru)}
         ".ps1" {$proc = (Start-Process -FilePath $powershell -ArgumentList $Execute -PassThru)}
-	
+	".vbs" {$proc = (Start-Process -FilePath $cscript -ArgumentList $Execute -PassThru)}
+	".js" {$proc = (Start-Process -FilePath $cscript -ArgumentList "//E:jscript $($Execute)" -PassThru)}
+	".dll" {
+	    $export = Read-Host -Prompt "File is a DLL, specify an export to execute or press enter to run DLL entry"
+	    if([string]::IsNullOrEmpty($export)){
+	        $proc = (Start-Process -FilePath "C:\WINDOWS\System32\rundll32.exe" -ArgumentList "$($Execute),#0" -PassThru)
+	    } else {
+	        $proc = (Start-Process -FilePath "C:\WINDOWS\System32\rundll32.exe" -ArgumentList "$($Execute),$($export)" -PassThru)
+	    }
+	}
         default {
             Write-Host "Unknown Extension: $($extension)" -ForegroundColor Yellow
             exit
@@ -265,7 +277,7 @@ Start-Sleep $executetime
 
 Write-Host "Parsing events for process tree: $($id)...`n" -ForegroundColor Cyan
 
-$global:all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
+$global:all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational -ErrorAction SilentlyContinue
 
 $events = get_event_tree($id)
 
@@ -276,7 +288,7 @@ ii -path $OutDir
 
 while(1){
     $term = Read-Host -Prompt "Search logs for keyword, get process tree events with events(processid), or exit()"
-    $all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational
+    $all_events = Get-WinEvent -LogName Microsoft-Windows-Sysmon/Operational -ErrorAction SilentlyContinue
     if(!$term){
     	continue
     }elseif($term -eq "exit()"){
